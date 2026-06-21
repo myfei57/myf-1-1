@@ -10,6 +10,9 @@ import type {
   RepairRecord,
   AssemblyPlan,
   GameConfig,
+  MemoryFragment,
+  MemoryStatus,
+  MemoryEventType,
 } from '../types';
 import {
   DEFAULT_CONFIG,
@@ -24,6 +27,10 @@ import {
   calculateRobotStats as calcStats,
   calculateAdaptability as calcAdapt,
   clamp,
+  createInitialTendency,
+  calculateTendencyFromMemories,
+  getTendencyModifiers,
+  generateMemoryDescription,
 } from '../utils/helpers';
 
 const EMPTY_SELECTED_PARTS: Record<PartType, Part | null> = {
@@ -62,7 +69,26 @@ export const useGameStore = create<Store>()(
           ),
         })),
 
-      addRobot: (robot) => set((state) => ({ robots: [...state.robots, robot] })),
+      addRobot: (robot) => {
+        const state = get();
+        const memData = generateMemoryDescription('assembly');
+        const assemblyMemory: MemoryFragment = {
+          id: generateId(),
+          robotId: robot.id,
+          eventType: 'assembly',
+          title: memData.title,
+          description: memData.description,
+          intensity: memData.intensity,
+          status: 'pending',
+          createdAt: Date.now(),
+        };
+        const robotWithMemory: Robot = {
+          ...robot,
+          memories: [assemblyMemory],
+          tendency: robot.tendency || createInitialTendency(),
+        };
+        set({ robots: [...state.robots, robotWithMemory] });
+      },
 
       removeRobot: (robotId) =>
         set((state) => ({
@@ -194,6 +220,16 @@ export const useGameStore = create<Store>()(
         };
         state.addRepairRecord(record);
 
+        const memData = generateMemoryDescription('repair', { repairSuccess: success });
+        state.addMemory(robotId, {
+          eventType: 'repair',
+          title: memData.title,
+          description: memData.description,
+          intensity: memData.intensity,
+          status: 'pending',
+          metadata: { repairSuccess: success },
+        });
+
         return { success, cost, restored };
       },
 
@@ -206,23 +242,33 @@ export const useGameStore = create<Store>()(
           throw new Error('Robot or mission not found');
         }
 
-        const adaptability = state.calculateAdaptability(robot, mission);
-        const successChance = clamp(adaptability / 100, 0.1, 0.95);
-        const success = Math.random() < successChance;
+        const modifiers = state.getTendencyModifier(robot, mission);
+        const adaptability = clamp(
+          state.calculateAdaptability(robot, mission) + modifiers.successBonus,
+          0,
+          100
+        );
+        const successChance = clamp(adaptability / 100, 0.05, 0.95);
+        const success = modifiers.isParanoid ? false : Math.random() < successChance;
 
         let durabilityLoss = Math.floor(mission.difficulty * 5 * Math.random() + 5);
         if (robot.isOverloaded) {
           durabilityLoss += state.config.overloadRules.durabilityPenalty;
         }
+        durabilityLoss = Math.max(
+          1,
+          Math.round(durabilityLoss * (1 - modifiers.durabilityReduction / 100))
+        );
 
         const newDurability = clamp(robot.durability - durabilityLoss, 0, robot.maxDurability);
         state.updateRobot(robotId, { durability: newDurability });
 
         let rewards = { credits: 0, materials: 0 };
         if (success) {
+          const rewardMultiplier = 1 + modifiers.rewardBonus / 100;
           rewards = {
-            credits: mission.rewards.credits,
-            materials: mission.rewards.materials,
+            credits: Math.round(mission.rewards.credits * rewardMultiplier),
+            materials: Math.round(mission.rewards.materials * rewardMultiplier),
           };
           state.addCredits(rewards.credits);
           state.addMaterials(rewards.materials);
@@ -232,6 +278,29 @@ export const useGameStore = create<Store>()(
             bonusParts.forEach((p) => state.addPart(p));
           }
         }
+
+        const eventType: MemoryEventType = success ? 'mission_success' : 'mission_failure';
+        const memData = generateMemoryDescription(eventType, {
+          missionName: mission.name,
+          missionType: mission.type,
+          difficulty: mission.difficulty,
+          durabilityLoss,
+          rewards,
+        });
+        state.addMemory(robotId, {
+          eventType,
+          title: memData.title,
+          description: memData.description,
+          intensity: memData.intensity,
+          status: 'pending',
+          metadata: {
+            missionName: mission.name,
+            missionType: mission.type,
+            difficulty: mission.difficulty,
+            durabilityLoss,
+            rewards,
+          },
+        });
 
         const record: MissionRecord = {
           id: generateId(),
@@ -285,6 +354,111 @@ export const useGameStore = create<Store>()(
       },
 
       loadFromStorage: () => {},
+
+      addMemory: (robotId, memory) => {
+        const state = get();
+        const robot = state.robots.find((r) => r.id === robotId);
+        if (!robot) return;
+
+        const newMemory: MemoryFragment = {
+          ...memory,
+          id: generateId(),
+          robotId,
+          createdAt: Date.now(),
+        };
+
+        let newMemories = [...(robot.memories || []), newMemory];
+        if (newMemories.length > state.config.memory.maxMemoriesPerRobot) {
+          const keptOrCompressed = newMemories.filter(
+            (m) => m.status === 'kept' || m.status === 'compressed'
+          );
+          const pending = newMemories.filter((m) => m.status === 'pending');
+          const excess =
+            newMemories.length - state.config.memory.maxMemoriesPerRobot;
+          pending.splice(0, excess);
+          newMemories = [...keptOrCompressed, ...pending];
+        }
+
+        const newTendency = calculateTendencyFromMemories(newMemories, state.config);
+
+        state.updateRobot(robotId, {
+          memories: newMemories,
+          tendency: newTendency,
+        });
+      },
+
+      updateMemoryStatus: (robotId, memoryId, status) => {
+        const state = get();
+        const robot = state.robots.find((r) => r.id === robotId);
+        if (!robot) return;
+
+        const newMemories = robot.memories.map((m) =>
+          m.id === memoryId ? { ...m, status } : m
+        );
+        const newTendency = calculateTendencyFromMemories(newMemories, state.config);
+
+        state.updateRobot(robotId, {
+          memories: newMemories,
+          tendency: newTendency,
+        });
+      },
+
+      compressMemories: (robotId) => {
+        const state = get();
+        const robot = state.robots.find((r) => r.id === robotId);
+        if (!robot) return;
+
+        const newMemories = robot.memories.map((m) => {
+          if (m.status === 'pending' || m.status === 'kept') {
+            return {
+              ...m,
+              status: 'compressed' as MemoryStatus,
+              intensity: Math.round(m.intensity * state.config.memory.compressionIntensityMultiplier),
+            };
+          }
+          return m;
+        });
+        const newTendency = calculateTendencyFromMemories(newMemories, state.config);
+
+        state.updateRobot(robotId, {
+          memories: newMemories,
+          tendency: newTendency,
+        });
+      },
+
+      clearAllMemories: (robotId) => {
+        const state = get();
+        const robot = state.robots.find((r) => r.id === robotId);
+        if (!robot) return;
+
+        const newMemories = robot.memories.map((m) => ({
+          ...m,
+          status: 'cleared' as MemoryStatus,
+        }));
+
+        state.updateRobot(robotId, {
+          memories: newMemories,
+          tendency: createInitialTendency(),
+        });
+      },
+
+      recalculateTendency: (robotId) => {
+        const state = get();
+        const robot = state.robots.find((r) => r.id === robotId);
+        if (!robot) return createInitialTendency();
+
+        const newTendency = calculateTendencyFromMemories(
+          robot.memories || [],
+          state.config
+        );
+        state.updateRobot(robotId, { tendency: newTendency });
+        return newTendency;
+      },
+
+      getTendencyModifier: (robot, _mission) => {
+        const state = get();
+        return getTendencyModifiers(robot, state.config);
+      },
 
       resetGame: () =>
         set({

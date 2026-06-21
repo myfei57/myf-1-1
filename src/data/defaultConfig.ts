@@ -1,4 +1,4 @@
-import type { GameConfig, Mission, PartType } from '../types';
+import type { GameConfig, Mission, PartType, MemoryEventType, MemoryTendencyType } from '../types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   rarities: {
@@ -121,6 +121,53 @@ export const DEFAULT_CONFIG: GameConfig = {
     rare: 0.6,
     epic: 0.7,
     legendary: 0.8,
+  },
+  memory: {
+    tendencyEffects: {
+      timid: {
+        name: '胆怯',
+        description: '经历多次失败后变得谨慎，成功率更高但奖励减少',
+        color: 'neon-cyan',
+        icon: 'Shield',
+        successBonus: 15,
+        rewardBonus: -20,
+        durabilityPenaltyReduction: 20,
+        paranoiaChance: 0.15,
+      },
+      adventurous: {
+        name: '冒险',
+        description: '多次成功后变得激进，奖励更丰厚但成功率降低',
+        color: 'neon-orange',
+        icon: 'Flame',
+        successBonus: -10,
+        rewardBonus: 30,
+        durabilityPenaltyReduction: -10,
+        paranoiaChance: 0.2,
+      },
+      guardian: {
+        name: '守护',
+        description: '经过多次维修后懂得自我保护，耐久损耗显著降低',
+        color: 'neon-green',
+        icon: 'Heart',
+        successBonus: 5,
+        rewardBonus: 0,
+        durabilityPenaltyReduction: 40,
+        paranoiaChance: 0.05,
+      },
+      ambitious: {
+        name: '贪功',
+        description: '积累了大量成功经验后追求极致回报，偏执风险较高',
+        color: 'neon-purple',
+        icon: 'Trophy',
+        successBonus: -5,
+        rewardBonus: 50,
+        durabilityPenaltyReduction: 5,
+        paranoiaChance: 0.3,
+      },
+    },
+    maxMemoriesPerRobot: 50,
+    intensityThreshold: 50,
+    compressionIntensityMultiplier: 0.5,
   },
 };
 
@@ -280,3 +327,40 @@ export const BLIND_BOX_PRICES: Record<string, number> = {
 
 export const INITIAL_CREDITS = 500;
 export const INITIAL_MATERIALS = 100;
+
+export const MEMORY_EVENT_LABELS: Record<MemoryEventType, string> = {
+  unbox: '开箱',
+  assembly: '装配',
+  repair: '维修',
+  mission_success: '任务成功',
+  mission_failure: '任务失败',
+};
+
+export const MEMORY_EVENT_COLORS: Record<MemoryEventType, string> = {
+  unbox: 'neon-purple',
+  assembly: 'neon-blue',
+  repair: 'neon-green',
+  mission_success: 'neon-orange',
+  mission_failure: 'neon-red',
+};
+
+export const TENDENCY_LABELS: Record<MemoryTendencyType, string> = {
+  timid: '胆怯',
+  adventurous: '冒险',
+  guardian: '守护',
+  ambitious: '贪功',
+};
+
+export const TENDENCY_COLORS: Record<MemoryTendencyType, string> = {
+  timid: 'neon-cyan',
+  adventurous: 'neon-orange',
+  guardian: 'neon-green',
+  ambitious: 'neon-purple',
+};
+
+export const MEMORY_STATUS_LABELS: Record<string, string> = {
+  pending: '待处理',
+  kept: '已保留',
+  compressed: '已压缩',
+  cleared: '已清除',
+};

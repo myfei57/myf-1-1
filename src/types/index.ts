@@ -4,6 +4,17 @@ export type PartType = 'head' | 'body' | 'arm' | 'leg' | 'core' | 'tool';
 
 export type MissionType = 'transport' | 'cleaning' | 'rescue' | 'combat';
 
+export type MemoryEventType =
+  | 'unbox'
+  | 'assembly'
+  | 'repair'
+  | 'mission_success'
+  | 'mission_failure';
+
+export type MemoryTendencyType = 'timid' | 'adventurous' | 'guardian' | 'ambitious';
+
+export type MemoryStatus = 'kept' | 'compressed' | 'cleared' | 'pending';
+
 export interface Part {
   id: string;
   name: string;
@@ -20,6 +31,33 @@ export interface Part {
   icon: string;
 }
 
+export interface MemoryFragment {
+  id: string;
+  robotId: string;
+  eventType: MemoryEventType;
+  title: string;
+  description: string;
+  intensity: number;
+  status: MemoryStatus;
+  createdAt: number;
+  metadata?: {
+    missionName?: string;
+    missionType?: MissionType;
+    difficulty?: number;
+    durabilityLoss?: number;
+    rewards?: { credits: number; materials: number };
+    partName?: string;
+    repairSuccess?: boolean;
+  };
+}
+
+export interface RobotTendency {
+  timid: number;
+  adventurous: number;
+  guardian: number;
+  ambitious: number;
+}
+
 export interface Robot {
   id: string;
   name: string;
@@ -34,6 +72,8 @@ export interface Robot {
   compatibilityIssues: string[];
   activeSetBonuses: string[];
   createdAt: number;
+  memories: MemoryFragment[];
+  tendency: RobotTendency;
 }
 
 export interface Mission {
@@ -127,6 +167,24 @@ export interface MissionWeights {
   durability: number;
 }
 
+export interface TendencyEffect {
+  name: string;
+  description: string;
+  color: string;
+  icon: string;
+  successBonus: number;
+  rewardBonus: number;
+  durabilityPenaltyReduction: number;
+  paranoiaChance: number;
+}
+
+export interface MemoryConfig {
+  tendencyEffects: Record<MemoryTendencyType, TendencyEffect>;
+  maxMemoriesPerRobot: number;
+  intensityThreshold: number;
+  compressionIntensityMultiplier: number;
+}
+
 export interface GameConfig {
   rarities: Record<Rarity, RarityConfig>;
   setBonuses: Record<string, SetBonusConfig>;
@@ -134,6 +192,7 @@ export interface GameConfig {
   repairRules: RepairRules;
   missionWeights: Record<MissionType, MissionWeights>;
   recyclingRates: Record<Rarity, number>;
+  memory: MemoryConfig;
 }
 
 export interface GameState {
@@ -184,6 +243,18 @@ export interface GameActions {
   openBlindBox: (type: Rarity, free?: boolean) => Part[];
   loadFromStorage: () => void;
   resetGame: () => void;
+  addMemory: (robotId: string, memory: Omit<MemoryFragment, 'id' | 'robotId' | 'createdAt'>) => void;
+  updateMemoryStatus: (robotId: string, memoryId: string, status: MemoryStatus) => void;
+  compressMemories: (robotId: string) => void;
+  clearAllMemories: (robotId: string) => void;
+  recalculateTendency: (robotId: string) => RobotTendency;
+  getTendencyModifier: (robot: Robot, mission?: Mission) => {
+    successBonus: number;
+    rewardBonus: number;
+    durabilityReduction: number;
+    isParanoid: boolean;
+    dominantTendency: MemoryTendencyType | null;
+  };
 }
 
 export type Store = GameState & GameActions;

@@ -34,7 +34,7 @@ import { StatBar } from '../components/StatBar';
 import { Modal } from '../components/Modal';
 import { useGameStore } from '../store/useGameStore';
 import { PART_TYPE_NAMES } from '../data/defaultConfig';
-import { generateId } from '../utils/helpers';
+import { generateId, createInitialTendency } from '../utils/helpers';
 import type { Part, PartType, Robot } from '../types';
 
 const SLOT_ORDER: PartType[] = ['head', 'body', 'arm', 'leg', 'core', 'tool'];
@@ -153,6 +153,8 @@ export function AssemblyPage() {
       durability: stats.maxDurability,
       repairCount: 0,
       createdAt: Date.now(),
+      memories: [],
+      tendency: createInitialTendency(),
     };
 
     addRobot(newRobot);

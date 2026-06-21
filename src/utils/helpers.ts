@@ -6,6 +6,10 @@ import type {
   Robot,
   Mission,
   GameConfig,
+  MemoryFragment,
+  MemoryTendencyType,
+  RobotTendency,
+  MemoryEventType,
 } from '../types';
 import { PART_TEMPLATES } from '../data/defaultConfig';
 
@@ -250,4 +254,154 @@ export function getRarityBorderClass(rarity: Rarity): string {
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+export function createInitialTendency(): RobotTendency {
+  return {
+    timid: 0,
+    adventurous: 0,
+    guardian: 0,
+    ambitious: 0,
+  };
+}
+
+const EVENT_TO_TENDENCY_WEIGHTS: Record<MemoryEventType, Partial<Record<MemoryTendencyType, number>>> = {
+  unbox: { adventurous: 5, ambitious: 3 },
+  assembly: { adventurous: 3, guardian: 5 },
+  repair: { guardian: 10, timid: 5 },
+  mission_success: { adventurous: 8, ambitious: 12 },
+  mission_failure: { timid: 15, guardian: 5 },
+};
+
+export function calculateTendencyFromMemories(
+  memories: MemoryFragment[],
+  config: GameConfig
+): RobotTendency {
+  const keptMemories = memories.filter((m) => m.status === 'kept');
+  const compressedMemories = memories.filter((m) => m.status === 'compressed');
+  const multiplier = config.memory.compressionIntensityMultiplier;
+
+  const tendency: RobotTendency = createInitialTendency();
+
+  for (const memory of keptMemories) {
+    const weights = EVENT_TO_TENDENCY_WEIGHTS[memory.eventType];
+    for (const [tendencyType, weight] of Object.entries(weights)) {
+      tendency[tendencyType as MemoryTendencyType] +=
+        (weight as number) * (memory.intensity / 100);
+    }
+  }
+
+  for (const memory of compressedMemories) {
+    const weights = EVENT_TO_TENDENCY_WEIGHTS[memory.eventType];
+    for (const [tendencyType, weight] of Object.entries(weights)) {
+      tendency[tendencyType as MemoryTendencyType] +=
+        (weight as number) * (memory.intensity / 100) * multiplier;
+    }
+  }
+
+  return tendency;
+}
+
+export function getDominantTendency(
+  tendency: RobotTendency,
+  threshold: number = 30
+): MemoryTendencyType | null {
+  const entries = Object.entries(tendency) as [MemoryTendencyType, number][];
+  const sorted = entries.sort((a, b) => b[1] - a[1]);
+  if (sorted[0][1] >= threshold) {
+    return sorted[0][0];
+  }
+  return null;
+}
+
+export function getTendencyModifiers(
+  robot: Robot,
+  config: GameConfig
+): {
+  successBonus: number;
+  rewardBonus: number;
+  durabilityReduction: number;
+  isParanoid: boolean;
+  dominantTendency: MemoryTendencyType | null;
+} {
+  const dominant = getDominantTendency(robot.tendency, config.memory.intensityThreshold);
+
+  if (!dominant) {
+    return {
+      successBonus: 0,
+      rewardBonus: 0,
+      durabilityReduction: 0,
+      isParanoid: false,
+      dominantTendency: null,
+    };
+  }
+
+  const effect = config.memory.tendencyEffects[dominant];
+  const intensity = Math.min(1, robot.tendency[dominant] / 100);
+  const isParanoid = Math.random() < effect.paranoiaChance * intensity;
+
+  return {
+    successBonus: Math.round(effect.successBonus * intensity),
+    rewardBonus: Math.round(effect.rewardBonus * intensity),
+    durabilityReduction: Math.round(effect.durabilityPenaltyReduction * intensity),
+    isParanoid,
+    dominantTendency: dominant,
+  };
+}
+
+export function generateMemoryDescription(
+  eventType: MemoryEventType,
+  metadata?: MemoryFragment['metadata']
+): { title: string; description: string; intensity: number } {
+  switch (eventType) {
+    case 'unbox':
+      return {
+        title: '初次启动',
+        description: metadata?.partName
+          ? `安装了新零件：${metadata.partName}，系统完成初始化校准。`
+          : '传感器第一次捕捉到世界的光影，这是存在的开始。',
+        intensity: 40,
+      };
+    case 'assembly':
+      return {
+        title: '躯体成形',
+        description: '各部位零件紧密结合，核心模块开始第一次脉动。躯体的每一寸都诉说着工程师的心血。',
+        intensity: 60,
+      };
+    case 'repair':
+      if (metadata?.repairSuccess) {
+        return {
+          title: '伤痕愈合',
+          description: '机械师的手拂过受损的线路，能量重新流转。每次修复都让自我保护意识更强烈。',
+          intensity: 50,
+        };
+      }
+      return {
+        title: '修复失败',
+        description: '尝试修复的努力付诸东流，磨损的部件提醒着：这个世界并不温柔。',
+        intensity: 80,
+      };
+    case 'mission_success':
+      return {
+        title: `任务完成：${metadata?.missionName || '未知任务'}`,
+        description: metadata?.difficulty && metadata.difficulty >= 4
+          ? '在极端条件下圆满完成任务！胜利的滋味让人渴望更多挑战。'
+          : '任务目标已达成。每一次成功都是能力的证明。',
+        intensity: metadata?.difficulty ? 30 + metadata.difficulty * 15 : 50,
+      };
+    case 'mission_failure':
+      return {
+        title: `任务失败：${metadata?.missionName || '未知任务'}`,
+        description: metadata?.durabilityLoss && metadata.durabilityLoss >= 30
+          ? '惨痛的失败！严重的损伤刻入记忆深处，下次面对类似场景或许应该更加谨慎...'
+          : '任务未能完成。失败的教训值得铭记。',
+        intensity: metadata?.durabilityLoss ? 40 + metadata.durabilityLoss : 70,
+      };
+    default:
+      return {
+        title: '记忆碎片',
+        description: '一段模糊的数据残片，意义不明。',
+        intensity: 20,
+      };
+  }
 }
