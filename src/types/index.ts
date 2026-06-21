@@ -15,6 +15,8 @@ export type MemoryTendencyType = 'timid' | 'adventurous' | 'guardian' | 'ambitio
 
 export type MemoryStatus = 'kept' | 'compressed' | 'cleared' | 'pending';
 
+export type PartSource = 'blind_box' | 'reward' | 'other';
+
 export interface Part {
   id: string;
   name: string;
@@ -29,6 +31,8 @@ export interface Part {
   maxDurability: number;
   description: string;
   icon: string;
+  source: PartSource;
+  sourceBoxRarity?: Rarity;
 }
 
 export interface MemoryFragment {

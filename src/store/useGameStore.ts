@@ -71,6 +71,43 @@ export const useGameStore = create<Store>()(
 
       addRobot: (robot) => {
         const state = get();
+        const memories: MemoryFragment[] = [];
+
+        const installedParts = Object.values(robot.parts).filter(Boolean) as Part[];
+        const blindBoxParts = installedParts.filter((p) => p.source === 'blind_box');
+
+        if (blindBoxParts.length > 0) {
+          const rarityCounts: Record<string, { count: number; name: string }> = {};
+          for (const part of blindBoxParts) {
+            const rarity = part.sourceBoxRarity || part.rarity;
+            if (!rarityCounts[rarity]) {
+              rarityCounts[rarity] = {
+                count: 0,
+                name: state.config.rarities[rarity]?.name || rarity,
+              };
+            }
+            rarityCounts[rarity].count++;
+          }
+          const rarityDesc = Object.entries(rarityCounts)
+            .map(([_, v]) => `${v.name}×${v.count}`)
+            .join('、');
+
+          const memData = generateMemoryDescription('unbox', {
+            partName: blindBoxParts[0].name,
+          });
+          const unboxMemory: MemoryFragment = {
+            id: generateId(),
+            robotId: robot.id,
+            eventType: 'unbox',
+            title: `盲盒零件装配：${blindBoxParts.length}件来自${rarityDesc}`,
+            description: `身体中有 ${blindBoxParts.length} 个零件来自盲盒：${blindBoxParts.map((p) => p.name).join('、')}。每一次开箱都是命运的邂逅。`,
+            intensity: 40 + blindBoxParts.length * 10,
+            status: 'pending',
+            createdAt: Date.now(),
+          };
+          memories.push(unboxMemory);
+        }
+
         const memData = generateMemoryDescription('assembly');
         const assemblyMemory: MemoryFragment = {
           id: generateId(),
@@ -82,9 +119,11 @@ export const useGameStore = create<Store>()(
           status: 'pending',
           createdAt: Date.now(),
         };
+        memories.push(assemblyMemory);
+
         const robotWithMemory: Robot = {
           ...robot,
-          memories: [assemblyMemory],
+          memories,
           tendency: robot.tendency || createInitialTendency(),
         };
         set({ robots: [...state.robots, robotWithMemory] });
@@ -347,7 +386,11 @@ export const useGameStore = create<Store>()(
 
         for (let i = 0; i < count; i++) {
           const part = generateRandomPart(state.config, type);
-          parts.push(part);
+          parts.push({
+            ...part,
+            source: 'blind_box',
+            sourceBoxRarity: type,
+          });
         }
 
         return parts;
@@ -413,7 +456,6 @@ export const useGameStore = create<Store>()(
             return {
               ...m,
               status: 'compressed' as MemoryStatus,
-              intensity: Math.round(m.intensity * state.config.memory.compressionIntensityMultiplier),
             };
           }
           return m;
